@@ -9,6 +9,6 @@
     "api": "node api.js"
   },
   "dependencies": {
-    "pg": "^8.16.3"
+    "@cloudbase/node-sdk": "^3.18.3"
   }
 }

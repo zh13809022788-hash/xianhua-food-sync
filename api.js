@@ -30,7 +30,7 @@ function readJson(fileName, fallback) {
 
 function createContentRepository() {
   return createCloudbaseRepository({
-    storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || 'xianhua-content',
+    storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || '',
     documentId: 'content',
     defaultValue: { articles: [], stores: [], goods: [], generatedAt: null, syncState: emptyState }
   }) || {
@@ -40,7 +40,7 @@ function createContentRepository() {
 
 function createStateRepository() {
   return createCloudbaseRepository({
-    storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || 'xianhua-content',
+    storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || '',
     documentId: 'sync-state',
     defaultValue: emptyState
   }) || {
