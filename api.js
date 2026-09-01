@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { URL } = require('node:url');
 const { createCloudbaseRepository } = require('./cloudbase-repository');
+const { createSyncService } = require('./sync-service');
 
 const dataDir = process.env.WECHAT_SYNC_DATA_DIR
   ? path.resolve(process.env.WECHAT_SYNC_DATA_DIR)
@@ -73,16 +74,90 @@ function sendJson(response, statusCode, payload) {
   response.end(body);
 }
 
+// ---------- 远程同步触发 ----------
+let syncRunning = false;
+let lastSyncError = null;
+let lastSyncResult = null;
+
+function isSyncAuthorized(request) {
+  const token = process.env.SYNC_TRIGGER_TOKEN || '';
+  if (!token) return false;
+  return request.headers['x-sync-token'] === token;
+}
+
+function startBackgroundSync() {
+  syncRunning = true;
+  lastSyncError = null;
+  const service = createSyncService({
+    credentials: {
+      appId: process.env.WECHAT_OFFICIAL_APPID,
+      appSecret: process.env.WECHAT_OFFICIAL_APPSECRET
+    }
+  });
+  service.syncOnce({
+    pageSize: Number(process.env.WECHAT_SYNC_PAGE_SIZE || 20),
+    maxPages: Number(process.env.WECHAT_SYNC_MAX_PAGES || 100)
+  }).then(result => {
+    lastSyncResult = {
+      finishedAt: new Date().toISOString(),
+      fetchedCount: result.fetchedCount,
+      newCount: result.newCount,
+      acceptedCount: result.acceptedCount,
+      pendingCount: result.pendingCount
+    };
+  }).catch(error => {
+    lastSyncError = String(error && (error.message || error.errMsg) || error);
+    console.error('sync failed:', lastSyncError);
+  }).finally(() => {
+    syncRunning = false;
+  });
+}
+
 async function handleRequest(request, response) {
-  if (request.method !== 'GET') {
-    sendJson(response, 405, { error: 'Method Not Allowed' });
-    return;
-  }
   const requestUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
   const segments = requestUrl.pathname.split('/').filter(Boolean);
   try {
     if (requestUrl.pathname === '/health') {
       sendJson(response, 200, { status: 'ok' });
+      return;
+    }
+    if (requestUrl.pathname === '/api/sync') {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: 'Method Not Allowed，请使用 POST 触发同步' });
+        return;
+      }
+      if (!process.env.SYNC_TRIGGER_TOKEN) {
+        sendJson(response, 503, { error: '未配置 SYNC_TRIGGER_TOKEN，无法远程触发同步' });
+        return;
+      }
+      if (!isSyncAuthorized(request)) {
+        sendJson(response, 401, { error: '无效的同步触发令牌' });
+        return;
+      }
+      if (syncRunning) {
+        sendJson(response, 202, { started: false, message: '同步正在进行中，请稍后通过 /api/sync/status 查询' });
+        return;
+      }
+      if (!process.env.WECHAT_OFFICIAL_APPID || !process.env.WECHAT_OFFICIAL_APPSECRET) {
+        sendJson(response, 503, { error: '未配置 WECHAT_OFFICIAL_APPID / WECHAT_OFFICIAL_APPSECRET 环境变量' });
+        return;
+      }
+      startBackgroundSync();
+      sendJson(response, 202, { started: true, message: '同步已开始，通过 /api/sync/status 查询进度' });
+      return;
+    }
+    if (requestUrl.pathname === '/api/sync/status') {
+      const data = await readData();
+      sendJson(response, 200, {
+        running: syncRunning,
+        lastError: lastSyncError,
+        lastResult: lastSyncResult,
+        syncState: data.syncState
+      });
+      return;
+    }
+    if (request.method !== 'GET') {
+      sendJson(response, 405, { error: 'Method Not Allowed' });
       return;
     }
     const data = await readData();

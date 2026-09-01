@@ -62,6 +62,15 @@ CLOUDBASE_DATA_COLLECTION=xianhua_content
 - `GET /api/content`：返回小程序需要的 `articles`、`stores`、`goods`、`generatedAt`、`syncState`。
 - `GET /api/stores/:id`：按门店 ID 获取门店。
 - `GET /api/articles/:id`：按文章 ID 获取文章。
+- `POST /api/sync`：远程触发一次公众号同步（云端部署时用，免登录服务器）。需要配置 `SYNC_TRIGGER_TOKEN` 环境变量，并在请求头带 `x-sync-token`。触发后立即返回，同步在后台执行。
+- `GET /api/sync/status`：查询同步状态（是否正在同步、上次结果、上次错误、sync-state 统计）。
+
+云端触发同步示例：
+
+```bash
+curl -X POST https://<服务访问地址>/api/sync -H "x-sync-token: <你的SYNC_TRIGGER_TOKEN>"
+curl https://<服务访问地址>/api/sync/status
+```
 
 小程序通过 `wx.cloud.callContainer` 调用时，不需要配置 request 合法域名；但必须在小程序开发者工具和 CloudBase 控制台关联同一环境，且服务名必须精确匹配。`app.js` 里需要填写环境 ID 和服务名。`CONTENT_API_BASE` 仍保留作 HTTPS 备用链路，要求使用已备案、可访问、证书有效的 HTTPS 地址。
 
