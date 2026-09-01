@@ -1,0 +1,14 @@
+{
+  "name": "xianhua-food-sync",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node api.js",
+    "sync": "node sync.js",
+    "sync:full": "node sync.js --full",
+    "api": "node api.js"
+  },
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.18.3"
+  }
+}
