@@ -51,11 +51,15 @@ Windows 计划任务示例：
 ```text
 CLOUDBASE_ENV_ID=xianhuanshuo-d0g06ofbub52c6721
 CLOUDBASE_SERVICE_NAME=xianhua-content-api
-# 为空：直接写入唯一桶 xianhua-content 的根目录
+# Web 云托管调用私有 PG 云存储时必须配置服务端 API Key
+CLOUDBASE_APIKEY=<CloudBase 服务端 API Key>
+# 明确指定 PostgreSQL 环境中创建的桶 ID
+CLOUDBASE_STORAGE_BUCKET=xianhua-content
+# 文件相对于桶根目录保存，保持空即可
 CLOUDBASE_STORAGE_PREFIX=
 ```
 
-首次同步时会自动写入 `content.json`、`published-articles.json`、`article-review-queue.json`、`sync-state.json` 四个文件。不要手动上传、创建文件夹或创建 `xianhua_content` 数据库集合。公众号凭证只放在云托管环境变量里，不要写进小程序代码或仓库。
+首次同步时会自动写入 `content.json`、`published-articles.json`、`article-review-queue.json`、`sync-state.json` 四个文件。不要手动上传、创建文件夹或创建 `xianhua_content` 数据库集合。私有桶的读写由云托管服务端 API Key 的 `service_role` 权限执行，不需要为了小程序读取而把桶设为公开。公众号凭证和 CloudBase API Key 只放在云托管环境变量里，不要写进小程序代码或仓库。
 
 接口：
 

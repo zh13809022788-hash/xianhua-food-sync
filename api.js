@@ -30,6 +30,7 @@ function readJson(fileName, fallback) {
 
 function createContentRepository() {
   return createCloudbaseRepository({
+    bucket: process.env.CLOUDBASE_STORAGE_BUCKET || '',
     storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || '',
     documentId: 'content',
     defaultValue: { articles: [], stores: [], goods: [], generatedAt: null, syncState: emptyState }
@@ -40,6 +41,7 @@ function createContentRepository() {
 
 function createStateRepository() {
   return createCloudbaseRepository({
+    bucket: process.env.CLOUDBASE_STORAGE_BUCKET || '',
     storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || '',
     documentId: 'sync-state',
     defaultValue: emptyState
@@ -185,8 +187,18 @@ async function handleRequest(request, response) {
     }
     sendJson(response, 404, { error: 'Not Found' });
   } catch (error) {
-    console.error(error.message);
-    sendJson(response, 500, { error: 'Internal Server Error' });
+    const message = String(error && (error.message || error.errMsg) || 'unknown error');
+    console.error(message);
+    const isStorageConfigurationError = message.includes('CLOUDBASE_APIKEY')
+      || message.includes('getCredential')
+      || message.includes('secretId')
+      || message.includes('RLS')
+      || message.includes('permission');
+    sendJson(response, 500, {
+      error: isStorageConfigurationError
+        ? 'CloudBase 私有桶访问未授权：请配置 CLOUDBASE_APIKEY 并确认其为服务端 API Key'
+        : 'Internal Server Error'
+    });
   }
 }
 

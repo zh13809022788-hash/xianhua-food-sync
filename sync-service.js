@@ -31,6 +31,7 @@ function createSyncService(options = {}) {
   const dataDir = options.dataDir || path.join(__dirname, 'data');
   const client = options.client || new OfficialAccountClient(options.credentials);
   const cloudOptions = {
+    bucket: process.env.CLOUDBASE_STORAGE_BUCKET || '',
     storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || ''
   };
   const localStateStore = createSyncStateStore(path.join(dataDir, 'sync-state.json'));
