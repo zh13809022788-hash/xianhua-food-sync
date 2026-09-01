@@ -31,7 +31,7 @@ function createSyncService(options = {}) {
   const dataDir = options.dataDir || path.join(__dirname, 'data');
   const client = options.client || new OfficialAccountClient(options.credentials);
   const cloudOptions = {
-    collectionName: process.env.CLOUDBASE_DATA_COLLECTION || 'xianhua_content'
+    storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || 'xianhua-content'
   };
   const localStateStore = createSyncStateStore(path.join(dataDir, 'sync-state.json'));
   const stateStore = options.stateStore || createCloudbaseRepository({

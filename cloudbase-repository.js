@@ -1,39 +1,47 @@
 'use strict';
 
+// PostgreSQL 环境不提供文档型数据库，因此用 CloudBase 云存储保存 JSON 文档。
 function createCloudbaseRepository(options = {}) {
   const envId = options.envId || process.env.CLOUDBASE_ENV_ID || '';
-  const collectionName = options.collectionName || process.env.CLOUDBASE_DATA_COLLECTION || 'xianhua_content';
   const documentId = options.documentId || 'content';
   const defaultValue = options.defaultValue;
+  const prefix = String(options.storagePrefix || process.env.CLOUDBASE_STORAGE_PREFIX || 'xianhua-content')
+    .replace(/^\/+|\/+$/g, '');
 
   if (!envId) return null;
 
-  let collectionPromise = null;
+  let appPromise = null;
 
-  async function getCollection() {
-    if (!collectionPromise) {
-      collectionPromise = Promise.resolve().then(() => {
+  async function getApp() {
+    if (!appPromise) {
+      appPromise = Promise.resolve().then(() => {
         let cloudbase;
         try {
           cloudbase = require('@cloudbase/node-sdk');
         } catch (error) {
           throw new Error('已配置 CLOUDBASE_ENV_ID，但 backend 未安装 @cloudbase/node-sdk');
         }
-        const app = cloudbase.init({ env: envId });
-        return app.database().collection(collectionName);
+        return cloudbase.init({ env: envId });
       });
     }
-    return collectionPromise;
+    return appPromise;
+  }
+
+  function cloudPath() {
+    return `${prefix}/${documentId}.json`;
+  }
+
+  function fileId() {
+    return `cloud://${envId}/${cloudPath()}`;
   }
 
   async function read() {
-    const collection = await getCollection();
+    const app = await getApp();
     try {
-      const result = await collection.doc(documentId).get();
-      const record = Array.isArray(result.data) ? result.data[0] : result.data;
-      return record && Object.prototype.hasOwnProperty.call(record, 'value')
-        ? record.value
-        : (record || defaultValue);
+      const result = await app.downloadFile({ fileID: fileId() });
+      const buffer = result && (result.fileContent || result.fileData || result.data);
+      if (!buffer) return defaultValue;
+      return JSON.parse(Buffer.isBuffer(buffer) ? buffer.toString('utf8') : String(buffer));
     } catch (error) {
       if (isNotFound(error)) return defaultValue;
       throw error;
@@ -41,19 +49,24 @@ function createCloudbaseRepository(options = {}) {
   }
 
   async function write(value) {
-    const collection = await getCollection();
-    await collection.doc(documentId).set({
-      value,
-      updatedAt: new Date().toISOString()
+    const app = await getApp();
+    const fileContent = Buffer.from(JSON.stringify(value, null, 2), 'utf8');
+    await app.uploadFile({
+      cloudPath: cloudPath(),
+      fileContent
     });
   }
 
-  return { read, write, filePath: `cloudbase://${collectionName}/${documentId}` };
+  return { read, write, filePath: fileId(), cloudPath: cloudPath() };
 }
 
 function isNotFound(error) {
   const message = String(error && (error.message || error.errMsg) || '').toLowerCase();
-  return message.includes('not found') || message.includes('does not exist') || message.includes('不存在');
+  return message.includes('not found')
+    || message.includes('does not exist')
+    || message.includes('不存在')
+    || message.includes('nosuchkey')
+    || message.includes('no such key');
 }
 
 module.exports = { createCloudbaseRepository };

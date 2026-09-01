@@ -49,12 +49,12 @@ Windows 计划任务示例：
 CloudBase 模式需要配置：
 
 ```text
-CLOUDBASE_ENV_ID=
-CLOUDBASE_SERVICE_NAME=
-CLOUDBASE_DATA_COLLECTION=xianhua_content
+CLOUDBASE_ENV_ID=xianhuanshuo-d0g06ofbub52c6721
+CLOUDBASE_STORAGE_PREFIX=xianhua-content
+CLOUDBASE_SERVICE_NAME=xianhua-content-api
 ```
 
-其中集合 `xianhua_content` 里要建立这几个文档 ID：`content`、`published-articles`、`article-review-queue`、`sync-state`。公众号凭证只放在云端环境变量里，不要写进小程序代码或仓库。
+当前环境是 PostgreSQL 类型，不能使用文档型数据库集合，因此后端改用云存储保存 JSON 文件。首次同步时会自动写入 `xianhua-content/content.json`、`published-articles.json`、`article-review-queue.json`、`sync-state.json`，不需要创建 `xianhua_content` 集合。公众号凭证只放在云端环境变量里，不要写进小程序代码或仓库。云存储权限需允许云托管服务账号读写。
 
 接口：
 
