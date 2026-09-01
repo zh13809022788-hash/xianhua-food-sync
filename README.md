@@ -46,15 +46,20 @@ Windows 计划任务示例：
 
 云托管部署时使用 `npm start` 或直接运行 `node api.js`，服务监听 `process.env.PORT`；本地开发仍可继续使用 `CONTENT_API_HOST` / `CONTENT_API_PORT`。
 
-CloudBase 模式需要配置：
+当前 CloudBase 环境是 PostgreSQL 类型，且没有开通云存储或文档型数据库；后端因此使用 PostgreSQL 保存同步数据。
 
 ```text
 CLOUDBASE_ENV_ID=xianhuanshuo-d0g06ofbub52c6721
-CLOUDBASE_STORAGE_PREFIX=xianhua-content
 CLOUDBASE_SERVICE_NAME=xianhua-content-api
+PGHOST=从 PostgreSQL 控制台复制
+PGPORT=5432
+PGDATABASE=从 PostgreSQL 控制台复制
+PGUSER=从 PostgreSQL 控制台复制
+PGPASSWORD=从 PostgreSQL 控制台复制
+PG_TABLE=xianhua_content_documents
 ```
 
-当前环境是 PostgreSQL 类型，不能使用文档型数据库集合，因此后端改用云存储保存 JSON 文件。首次同步时会自动写入 `xianhua-content/content.json`、`published-articles.json`、`article-review-queue.json`、`sync-state.json`，不需要创建 `xianhua_content` 集合。公众号凭证只放在云端环境变量里，不要写进小程序代码或仓库。云存储权限需允许云托管服务账号读写。
+首次读写时，服务会自动建立 `xianhua_content_documents` 表，并以四条 JSONB 记录保存 `content`、`published-articles`、`article-review-queue`、`sync-state`。不需要创建 `xianhua_content` 集合，也不需要开通云存储。公众号与 PostgreSQL 凭证只放在云托管环境变量里，不要写进小程序代码或仓库。
 
 接口：
 

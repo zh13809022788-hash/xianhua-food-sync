@@ -1,72 +1,75 @@
 'use strict';
 
-// PostgreSQL 环境不提供文档型数据库，因此用 CloudBase 云存储保存 JSON 文档。
+// PostgreSQL 环境的通用 JSON 文档仓库。云托管环境变量配置完整时启用，
+// 未配置时返回 null，让开发环境继续使用本地 JSON 文件。
 function createCloudbaseRepository(options = {}) {
-  const envId = options.envId || process.env.CLOUDBASE_ENV_ID || '';
   const documentId = options.documentId || 'content';
   const defaultValue = options.defaultValue;
-  const prefix = String(options.storagePrefix || process.env.CLOUDBASE_STORAGE_PREFIX || 'xianhua-content')
-    .replace(/^\/+|\/+$/g, '');
+  const tableName = process.env.PG_TABLE || 'xianhua_content_documents';
+  const config = {
+    host: process.env.PGHOST,
+    port: Number(process.env.PGPORT || 5432),
+    database: process.env.PGDATABASE,
+    user: process.env.PGUSER,
+    password: process.env.PGPASSWORD,
+    ssl: { rejectUnauthorized: false },
+    max: Number(process.env.PGPOOL_MAX || 3),
+    idleTimeoutMillis: 30000
+  };
 
-  if (!envId) return null;
+  if (!config.host || !config.database || !config.user || !config.password) return null;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(tableName)) throw new Error('PG_TABLE 只允许字母、数字和下划线');
 
-  let appPromise = null;
+  let poolPromise = null;
+  let schemaPromise = null;
 
-  async function getApp() {
-    if (!appPromise) {
-      appPromise = Promise.resolve().then(() => {
-        let cloudbase;
+  async function getPool() {
+    if (!poolPromise) {
+      poolPromise = Promise.resolve().then(() => {
+        let pg;
         try {
-          cloudbase = require('@cloudbase/node-sdk');
+          pg = require('pg');
         } catch (error) {
-          throw new Error('已配置 CLOUDBASE_ENV_ID，但 backend 未安装 @cloudbase/node-sdk');
+          throw new Error('已配置 PostgreSQL，但 backend 未安装 pg');
         }
-        return cloudbase.init({ env: envId });
+        return new pg.Pool(config);
       });
     }
-    return appPromise;
+    return poolPromise;
   }
 
-  function cloudPath() {
-    return `${prefix}/${documentId}.json`;
-  }
-
-  function fileId() {
-    return `cloud://${envId}/${cloudPath()}`;
+  async function ensureSchema() {
+    if (!schemaPromise) {
+      schemaPromise = getPool().then(pool => pool.query(`
+        CREATE TABLE IF NOT EXISTS ${tableName} (
+          document_id TEXT PRIMARY KEY,
+          value JSONB NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `));
+    }
+    return schemaPromise;
   }
 
   async function read() {
-    const app = await getApp();
-    try {
-      const result = await app.downloadFile({ fileID: fileId() });
-      const buffer = result && (result.fileContent || result.fileData || result.data);
-      if (!buffer) return defaultValue;
-      return JSON.parse(Buffer.isBuffer(buffer) ? buffer.toString('utf8') : String(buffer));
-    } catch (error) {
-      if (isNotFound(error)) return defaultValue;
-      throw error;
-    }
+    const pool = await getPool();
+    await ensureSchema();
+    const result = await pool.query(`SELECT value FROM ${tableName} WHERE document_id = $1`, [documentId]);
+    return result.rows[0] ? result.rows[0].value : defaultValue;
   }
 
   async function write(value) {
-    const app = await getApp();
-    const fileContent = Buffer.from(JSON.stringify(value, null, 2), 'utf8');
-    await app.uploadFile({
-      cloudPath: cloudPath(),
-      fileContent
-    });
+    const pool = await getPool();
+    await ensureSchema();
+    await pool.query(`
+      INSERT INTO ${tableName} (document_id, value, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (document_id)
+      DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+    `, [documentId, JSON.stringify(value)]);
   }
 
-  return { read, write, filePath: fileId(), cloudPath: cloudPath() };
-}
-
-function isNotFound(error) {
-  const message = String(error && (error.message || error.errMsg) || '').toLowerCase();
-  return message.includes('not found')
-    || message.includes('does not exist')
-    || message.includes('不存在')
-    || message.includes('nosuchkey')
-    || message.includes('no such key');
+  return { read, write, filePath: `postgres://${tableName}/${documentId}` };
 }
 
 module.exports = { createCloudbaseRepository };
