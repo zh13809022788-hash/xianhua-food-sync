@@ -19,9 +19,10 @@ function createCloudbaseRepository(options = {}) {
       appPromise = Promise.resolve().then(() => {
         let cloudbase;
         try {
-          cloudbase = require('@cloudbase/node-sdk');
+          cloudbase = require('@cloudbase/js-sdk');
+          require('@cloudbase/js-sdk/storage');
         } catch (error) {
-          throw new Error('已配置 CLOUDBASE_ENV_ID，但 backend 未安装 @cloudbase/node-sdk');
+          throw new Error('已配置 CLOUDBASE_ENV_ID，但 backend 未安装 @cloudbase/js-sdk');
         }
         return cloudbase.init({
           env: envId,
@@ -44,21 +45,15 @@ function createCloudbaseRepository(options = {}) {
   async function read() {
     const app = await getApp();
     try {
-      if (bucket) {
-        const result = await app.storage.from(bucket).download(cloudPath());
-        if (result && result.error) throw result.error;
-        const data = result && result.data;
-        if (!data) return defaultValue;
-        const text = typeof data.text === 'function'
-          ? await data.text()
-          : Buffer.from(data).toString('utf8');
-        return JSON.parse(text);
-      }
-
-      const result = await app.downloadFile({ fileID: fileId() });
-      const buffer = result && result.fileContent;
-      if (!buffer) return defaultValue;
-      return JSON.parse(buffer.toString('utf8'));
+      // PG 云存储使用桶内相对路径，不使用传统 cloud:// fileID。
+      const result = await app.storage.from(bucket).download(cloudPath());
+      if (result && result.error) throw result.error;
+      const data = result && result.data;
+      if (!data) return defaultValue;
+      const text = typeof data.text === 'function'
+        ? await data.text()
+        : Buffer.from(data).toString('utf8');
+      return JSON.parse(text);
     } catch (error) {
       if (isNotFound(error)) return defaultValue;
       throw error;
@@ -68,15 +63,11 @@ function createCloudbaseRepository(options = {}) {
   async function write(value) {
     const app = await getApp();
     const fileContent = Buffer.from(JSON.stringify(value, null, 2), 'utf8');
-    if (bucket) {
-      const result = await app.storage.from(bucket).upload(cloudPath(), fileContent, {
-        contentType: 'application/json',
-        upsert: true
-      });
-      if (result && result.error) throw result.error;
-      return;
-    }
-    await app.uploadFile({ cloudPath: cloudPath(), fileContent });
+    const result = await app.storage.from(bucket).upload(cloudPath(), fileContent, {
+      contentType: 'application/json',
+      upsert: true
+    });
+    if (result && result.error) throw result.error;
   }
 
   return { read, write, filePath: fileId(), cloudPath: cloudPath(), bucket };

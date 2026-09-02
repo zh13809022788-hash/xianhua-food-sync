@@ -9,6 +9,6 @@
     "api": "node api.js"
   },
   "dependencies": {
-    "@cloudbase/node-sdk": "^3.18.3"
+    "@cloudbase/js-sdk": "^3.8.2"
   }
 }

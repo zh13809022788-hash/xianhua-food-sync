@@ -51,7 +51,7 @@ Windows 计划任务示例：
 ```text
 CLOUDBASE_ENV_ID=xianhuanshuo-d0g06ofbub52c6721
 CLOUDBASE_SERVICE_NAME=xianhua-content-api
-# Web 云托管调用私有 PG 云存储时必须配置服务端 API Key
+# Web 云托管调用私有 PG 云存储时必须配置服务端 API Key（供 @cloudbase/js-sdk 使用）
 CLOUDBASE_APIKEY=<CloudBase 服务端 API Key>
 # 明确指定 PostgreSQL 环境中创建的桶 ID
 CLOUDBASE_STORAGE_BUCKET=xianhua-content
