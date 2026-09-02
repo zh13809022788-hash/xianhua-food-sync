@@ -1,4 +1,4 @@
-const { normalizeArticleInput } = require('../utils/article-import');
+const { normalizeArticleInput } = require('./article-import');
 
 function toArray(value) {
   if (Array.isArray(value)) return value;

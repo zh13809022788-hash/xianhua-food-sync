@@ -1,4 +1,4 @@
-const { buildStoreRecords } = require('../utils/article-import');
+const { buildStoreRecords } = require('./article-import');
 
 function createArticleStructurer(options = {}) {
   const extractor = options.extractor || defaultExtractor;
