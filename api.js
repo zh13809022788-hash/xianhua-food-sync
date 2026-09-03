@@ -189,6 +189,7 @@ async function handleRequest(request, response) {
   } catch (error) {
     const message = String(error && (error.message || error.errMsg) || 'unknown error');
     console.error(message);
+    const safeMessage = message.replace(/Bearer\s+[^\s]+/gi, 'Bearer [redacted]');
     const isStorageConfigurationError = message.includes('CLOUDBASE_APIKEY')
       || message.includes('getCredential')
       || message.includes('secretId')
@@ -197,7 +198,8 @@ async function handleRequest(request, response) {
     sendJson(response, 500, {
       error: isStorageConfigurationError
         ? 'CloudBase 私有桶访问未授权：请配置 CLOUDBASE_APIKEY 并确认其为服务端 API Key'
-        : 'Internal Server Error'
+        : 'Internal Server Error',
+      detail: process.env.NODE_ENV === 'production' ? undefined : safeMessage
     });
   }
 }

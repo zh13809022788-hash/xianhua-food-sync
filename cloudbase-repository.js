@@ -12,25 +12,35 @@ function createCloudbaseRepository(options = {}) {
 
   if (!envId) return null;
 
-  let appPromise = null;
+  const apiKey = String(process.env.CLOUDBASE_APIKEY || '').trim();
+  const gatewayBase = String(
+    process.env.CLOUDBASE_STORAGE_API_BASE
+      || `https://${envId}.api.tcloudbasegateway.com`
+  ).replace(/\/+$/, '');
 
-  async function getApp() {
-    if (!appPromise) {
-      appPromise = Promise.resolve().then(() => {
-        let cloudbase;
-        try {
-          cloudbase = require('@cloudbase/js-sdk');
-          require('@cloudbase/js-sdk/storage');
-        } catch (error) {
-          throw new Error('已配置 CLOUDBASE_ENV_ID，但 backend 未安装 @cloudbase/js-sdk');
-        }
-        return cloudbase.init({
-          env: envId,
-          accessKey: process.env.CLOUDBASE_APIKEY || undefined
-        });
-      });
+  function objectUrl() {
+    const encodedBucket = encodeURIComponent(bucket);
+    const encodedPath = cloudPath().split('/').map(encodeURIComponent).join('/');
+    return `${gatewayBase}/v1/storages/object/${encodedBucket}/${encodedPath}`;
+  }
+
+  async function requestObject(method, body, contentType) {
+    if (!bucket) throw new Error('未配置 CLOUDBASE_STORAGE_BUCKET');
+    if (!apiKey) throw new Error('未配置 CLOUDBASE_APIKEY');
+    const headers = {
+      authorization: `Bearer ${apiKey}`
+    };
+    if (body) {
+      headers['content-type'] = contentType || 'application/octet-stream';
+      headers['content-length'] = String(body.length);
     }
-    return appPromise;
+    const result = await fetch(objectUrl(), { method, headers, body });
+    const buffer = Buffer.from(await result.arrayBuffer());
+    if (!result.ok) {
+      const detail = buffer.toString('utf8').slice(0, 500);
+      throw new Error(`CloudBase storage ${method} ${result.status}: ${detail}`);
+    }
+    return buffer;
   }
 
   function cloudPath() {
@@ -43,17 +53,9 @@ function createCloudbaseRepository(options = {}) {
   }
 
   async function read() {
-    const app = await getApp();
     try {
-      // PG 云存储使用桶内相对路径，不使用传统 cloud:// fileID。
-      const result = await app.storage.from(bucket).download(cloudPath());
-      if (result && result.error) throw result.error;
-      const data = result && result.data;
-      if (!data) return defaultValue;
-      const text = typeof data.text === 'function'
-        ? await data.text()
-        : Buffer.from(data).toString('utf8');
-      return JSON.parse(text);
+      const buffer = await requestObject('GET');
+      return JSON.parse(buffer.toString('utf8'));
     } catch (error) {
       if (isNotFound(error)) return defaultValue;
       throw error;
@@ -61,13 +63,8 @@ function createCloudbaseRepository(options = {}) {
   }
 
   async function write(value) {
-    const app = await getApp();
     const fileContent = Buffer.from(JSON.stringify(value, null, 2), 'utf8');
-    const result = await app.storage.from(bucket).upload(cloudPath(), fileContent, {
-      contentType: 'application/json',
-      upsert: true
-    });
-    if (result && result.error) throw result.error;
+    await requestObject('PUT', fileContent, 'application/json');
   }
 
   return { read, write, filePath: fileId(), cloudPath: cloudPath(), bucket };
