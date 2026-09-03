@@ -127,7 +127,37 @@ async function handleRequest(request, response) {
   const segments = requestUrl.pathname.split('/').filter(Boolean);
   try {
     if (requestUrl.pathname === '/health') {
-      sendJson(response, 200, { status: 'ok' });
+      sendJson(response, 200, { status: 'ok', version: 'ad71fb6' });
+      return;
+    }
+    if (requestUrl.pathname === '/api/debug/storage') {
+      const repository = createCloudbaseRepository({
+        bucket: process.env.CLOUDBASE_STORAGE_BUCKET || '',
+        storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || '',
+        documentId: 'content',
+        defaultValue: null
+      });
+      try {
+        const value = await repository.read();
+        sendJson(response, 200, {
+          ok: true,
+          envConfigured: Boolean(process.env.CLOUDBASE_ENV_ID),
+          bucketConfigured: Boolean(process.env.CLOUDBASE_STORAGE_BUCKET),
+          apiKeyConfigured: Boolean(process.env.CLOUDBASE_APIKEY),
+          cloudPath: repository && repository.cloudPath,
+          hasContent: Boolean(value)
+        });
+      } catch (error) {
+        const detail = sanitizeErrorDetail(String(error && (error.message || error.errMsg) || error));
+        sendJson(response, 502, {
+          ok: false,
+          envConfigured: Boolean(process.env.CLOUDBASE_ENV_ID),
+          bucketConfigured: Boolean(process.env.CLOUDBASE_STORAGE_BUCKET),
+          apiKeyConfigured: Boolean(process.env.CLOUDBASE_APIKEY),
+          cloudPath: repository && repository.cloudPath,
+          detail
+        });
+      }
       return;
     }
     if (requestUrl.pathname === '/api/sync') {
