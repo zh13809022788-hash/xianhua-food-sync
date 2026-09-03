@@ -66,6 +66,13 @@ async function readData() {
   };
 }
 
+function sanitizeErrorDetail(message) {
+  return String(message || '')
+    .replace(/Bearer\s+[^\s]+/gi, 'Bearer [redacted]')
+    .replace(/(apikey|api-key|accessKey|token|secret)["']?\s*[:=]\s*["']?[^,\s}"']+/gi, '$1=[redacted]')
+    .slice(0, 300);
+}
+
 function sendJson(response, statusCode, payload) {
   const body = JSON.stringify(payload);
   response.writeHead(statusCode, {
@@ -199,7 +206,7 @@ async function handleRequest(request, response) {
       error: isStorageConfigurationError
         ? 'CloudBase 私有桶访问未授权：请配置 CLOUDBASE_APIKEY 并确认其为服务端 API Key'
         : 'Internal Server Error',
-      detail: process.env.NODE_ENV === 'production' ? undefined : safeMessage
+      detail: sanitizeErrorDetail(safeMessage)
     });
   }
 }
