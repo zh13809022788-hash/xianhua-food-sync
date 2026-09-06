@@ -246,6 +246,12 @@ const server = http.createServer((request, response) => {
 });
 server.listen(port, host, () => {
   console.log(`Content API listening on http://${host}:${port}`);
+  if (process.env.WECHAT_OFFICIAL_APPID && process.env.WECHAT_OFFICIAL_APPSECRET) {
+    console.log('Automatic official-account sync started');
+    startBackgroundSync();
+  } else {
+    console.warn('Automatic sync skipped: missing WeChat credentials');
+  }
 });
 server.on('error', () => {
   process.exitCode = 1;
