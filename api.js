@@ -7,6 +7,7 @@ const { URL } = require('node:url');
 const { createCloudbaseRepository } = require('./cloudbase-repository');
 const { createSyncService } = require('./sync-service');
 const { normalizeArticleInput, buildStoreRecords } = require('./article-import');
+const BUILD_VERSION = '0a02a38';
 
 const dataDir = process.env.WECHAT_SYNC_DATA_DIR
   ? path.resolve(process.env.WECHAT_SYNC_DATA_DIR)
@@ -179,7 +180,7 @@ async function handleRequest(request, response) {
   const segments = requestUrl.pathname.split('/').filter(Boolean);
   try {
     if (requestUrl.pathname === '/health') {
-      sendJson(response, 200, { status: 'ok', version: 'ad71fb6' });
+      sendJson(response, 200, { status: 'ok', version: BUILD_VERSION });
       return;
     }
     if (requestUrl.pathname === '/api/debug/storage') {
