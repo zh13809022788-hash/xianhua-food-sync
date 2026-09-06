@@ -6,6 +6,7 @@ const path = require('node:path');
 const { URL } = require('node:url');
 const { createCloudbaseRepository } = require('./cloudbase-repository');
 const { createSyncService } = require('./sync-service');
+const { normalizeArticleInput, buildStoreRecords } = require('./article-import');
 
 const dataDir = process.env.WECHAT_SYNC_DATA_DIR
   ? path.resolve(process.env.WECHAT_SYNC_DATA_DIR)
@@ -122,6 +123,57 @@ function startBackgroundSync() {
   });
 }
 
+function readRequestBody(request) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    request.on('data', chunk => {
+      body += chunk;
+      if (body.length > 1024 * 1024) {
+        reject(new Error('请求体超过 1MB'));
+        request.destroy();
+      }
+    });
+    request.on('end', () => {
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error('请求体必须是合法 JSON'));
+      }
+    });
+    request.on('error', reject);
+  });
+}
+
+function isArticleUrl(url) {
+  return /^https:\/\/mp\.weixin\.qq\.com\/s\/[A-Za-z0-9_-]+/.test(String(url || ''));
+}
+
+async function importArticleFromUrl(payload) {
+  const url = String(payload && payload.url || '').trim();
+  if (!isArticleUrl(url)) throw new Error('只支持已发布的微信公众号文章链接：https://mp.weixin.qq.com/s/...');
+  const response = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0' } });
+  if (!response.ok) throw new Error(`文章页面抓取失败：HTTP ${response.status}`);
+  const html = await response.text();
+  const title = (html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["']/i) || [])[1]
+    || (html.match(/<title[^>]*>([\\s\\S]*?)<\/title>/i) || [])[1]
+    || '';
+  const description = (html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i) || [])[1] || '';
+  const cover = (html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']*)["']/i) || [])[1] || '';
+  const articleId = `link-${Buffer.from(url).toString('base64url').slice(0, 32)}`;
+  return normalizeArticleInput({
+    id: articleId,
+    title: title.replace(/&amp;/g, '&').trim(),
+    url,
+    summary: description.replace(/&amp;/g, '&').trim(),
+    cover,
+    city: payload.city || '',
+    area: payload.area || '',
+    storeIds: payload.storeIds || [],
+    storeProfiles: payload.storeProfiles || []
+  });
+}
+
 async function handleRequest(request, response) {
   const requestUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
   const segments = requestUrl.pathname.split('/').filter(Boolean);
@@ -158,6 +210,52 @@ async function handleRequest(request, response) {
           detail
         });
       }
+      return;
+    }
+    if (requestUrl.pathname === '/api/articles/import') {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: 'Method Not Allowed，请使用 POST 导入文章' });
+        return;
+      }
+      if (!isSyncAuthorized(request)) {
+        sendJson(response, 401, { error: '无效的同步触发令牌' });
+        return;
+      }
+      const payload = await readRequestBody(request);
+      const article = await importArticleFromUrl(payload);
+      const structured = buildStoreRecords(article);
+      const queueRepository = createCloudbaseRepository({
+        bucket: process.env.CLOUDBASE_STORAGE_BUCKET || '',
+        storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || '',
+        documentId: 'article-review-queue',
+        defaultValue: []
+      });
+      const queue = await queueRepository.read();
+      if (!structured.valid) {
+        const pending = {
+          articleId: article.id,
+          title: article.title,
+          url: article.url,
+          raw: article,
+          errors: structured.errors,
+          warnings: structured.warnings,
+          status: '待补门店结构化信息'
+        };
+        await queueRepository.write([...queue.filter(item => item.articleId !== article.id), pending]);
+        sendJson(response, 202, { imported: true, status: 'pending', article, errors: structured.errors, warnings: structured.warnings });
+        return;
+      }
+      const contentRepository = createCloudbaseRepository({
+        bucket: process.env.CLOUDBASE_STORAGE_BUCKET || '',
+        storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || '',
+        documentId: 'content',
+        defaultValue: { articles: [], stores: [], goods: [], generatedAt: null, syncState: null }
+      });
+      const content = await contentRepository.read();
+      const articles = [...(content.articles || []).filter(item => item.id !== article.id), article];
+      const stores = [...(content.stores || []).filter(item => item.articleId !== article.id), ...structured.stores];
+      await contentRepository.write({ ...content, articles, stores, generatedAt: new Date().toISOString() });
+      sendJson(response, 200, { imported: true, status: 'accepted', article, stores: structured.stores });
       return;
     }
     if (requestUrl.pathname === '/api/sync') {
