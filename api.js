@@ -9,7 +9,7 @@ const { createSyncService } = require('./sync-service');
 const { normalizeArticleInput, buildStoreRecords } = require('./article-import');
 const { renderOfficialArticle } = require('./wechat-renderer');
 const crypto = require('node:crypto');
-const BUILD_VERSION = 'batch-import-20260907-idfix';
+const BUILD_VERSION = 'batch-import-20260907-cleanup-1';
 
 const dataDir = process.env.WECHAT_SYNC_DATA_DIR
   ? path.resolve(process.env.WECHAT_SYNC_DATA_DIR)
