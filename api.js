@@ -8,7 +8,8 @@ const { createCloudbaseRepository } = require('./cloudbase-repository');
 const { createSyncService } = require('./sync-service');
 const { normalizeArticleInput, buildStoreRecords } = require('./article-import');
 const { renderOfficialArticle } = require('./wechat-renderer');
-const BUILD_VERSION = 'batch-import-20260907';
+const crypto = require('node:crypto');
+const BUILD_VERSION = 'batch-import-20260907-idfix';
 
 const dataDir = process.env.WECHAT_SYNC_DATA_DIR
   ? path.resolve(process.env.WECHAT_SYNC_DATA_DIR)
@@ -179,7 +180,7 @@ async function importArticleFromUrl(payload) {
     || decodeHtml((html.match(/<title[^>]*>([\\s\\S]*?)<\/title>/i) || [])[1]);
   const description = rendered.summary || meta('', 'description') || meta('og:description');
   const cover = rendered.cover || meta('og:image');
-  const articleId = `link-${Buffer.from(url).toString('base64url').slice(0, 32)}`;
+  const articleId = `link-${crypto.createHash('sha256').update(url).digest('hex').slice(0, 24)}`;
   return normalizeArticleInput({
     id: articleId,
     title: title.replace(/&amp;/g, '&').trim(),
