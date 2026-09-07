@@ -9,6 +9,7 @@
     "api": "node api.js"
   },
   "dependencies": {
-    "@cloudbase/js-sdk": "^3.8.2"
+    "@cloudbase/js-sdk": "^3.8.2",
+    "playwright-core": "^1.61.1"
   }
 }

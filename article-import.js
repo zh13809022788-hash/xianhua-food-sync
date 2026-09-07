@@ -41,6 +41,7 @@ function normalizeArticleInput(input) {
     url: String(source.url || '').trim(),
     publishedAt: source.publishedAt || '',
     summary: String(source.summary || '').trim(),
+    content: String(source.content || '').trim(),
     videoUrl: String(source.videoUrl || '').trim(),
     videoFinderUserName: String(source.videoFinderUserName || '').trim(),
     videoFeedId: String(source.videoFeedId || '').trim(),

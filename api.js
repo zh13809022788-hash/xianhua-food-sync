@@ -7,7 +7,8 @@ const { URL } = require('node:url');
 const { createCloudbaseRepository } = require('./cloudbase-repository');
 const { createSyncService } = require('./sync-service');
 const { normalizeArticleInput, buildStoreRecords } = require('./article-import');
-const BUILD_VERSION = '0a02a38';
+const { renderOfficialArticle } = require('./wechat-renderer');
+const BUILD_VERSION = 'batch-import-20260907';
 
 const dataDir = process.env.WECHAT_SYNC_DATA_DIR
   ? path.resolve(process.env.WECHAT_SYNC_DATA_DIR)
@@ -153,26 +154,63 @@ function isArticleUrl(url) {
 async function importArticleFromUrl(payload) {
   const url = String(payload && payload.url || '').trim();
   if (!isArticleUrl(url)) throw new Error('只支持已发布的微信公众号文章链接：https://mp.weixin.qq.com/s/...');
-  const response = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0' } });
-  if (!response.ok) throw new Error(`文章页面抓取失败：HTTP ${response.status}`);
-  const html = await response.text();
-  const title = (html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["']/i) || [])[1]
-    || (html.match(/<title[^>]*>([\\s\\S]*?)<\/title>/i) || [])[1]
-    || '';
-  const description = (html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i) || [])[1] || '';
-  const cover = (html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']*)["']/i) || [])[1] || '';
+  const rendered = await renderOfficialArticle(url);
+  let html = '';
+  try {
+    const response = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0' } });
+    if (response.ok) html = await response.text();
+  } catch (error) {
+    // Chromium 已经取得正文时，普通 HTTP 请求失败不影响导入。
+  }
+  const decodeHtml = value => String(value || '')
+    .replace(/&#39;|&#x27;/gi, "'")
+    .replace(/&quot;|&#x22;/gi, '"')
+    .replace(/&amp;/gi, '&')
+    .replace(/<[^>]+>/g, '')
+    .trim();
+  const meta = (property, name) => {
+    const propertyMatch = property && html.match(new RegExp(`<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']*)["']`, 'i'));
+    const nameMatch = name && html.match(new RegExp(`<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']*)["']`, 'i'));
+    return decodeHtml((propertyMatch || nameMatch || [])[1]);
+  };
+  const title = rendered.title
+    || meta('og:title')
+    || decodeHtml((html.match(/<h1[^>]*>([\\s\\S]*?)<\/h1>/i) || [])[1])
+    || decodeHtml((html.match(/<title[^>]*>([\\s\\S]*?)<\/title>/i) || [])[1]);
+  const description = rendered.summary || meta('', 'description') || meta('og:description');
+  const cover = rendered.cover || meta('og:image');
   const articleId = `link-${Buffer.from(url).toString('base64url').slice(0, 32)}`;
   return normalizeArticleInput({
     id: articleId,
     title: title.replace(/&amp;/g, '&').trim(),
     url,
     summary: description.replace(/&amp;/g, '&').trim(),
+    content: rendered.content,
     cover,
     city: payload.city || '',
     area: payload.area || '',
     storeIds: payload.storeIds || [],
     storeProfiles: payload.storeProfiles || []
   });
+}
+
+async function importArticleBatch(payload) {
+  const urls = Array.isArray(payload && payload.urls) ? payload.urls : [];
+  if (!urls.length) throw new Error('请至少提供一条公众号文章链接');
+  if (urls.length > 50) throw new Error('单次最多导入 50 条文章链接');
+  const results = [];
+  for (const url of [...new Set(urls.map(item => String(item || '').trim()).filter(Boolean))]) {
+    try {
+      const article = await importArticleFromUrl({ ...payload, url });
+      const structured = buildStoreRecords(article);
+      results.push(structured.valid
+        ? { url, status: 'accepted', title: article.title, article, stores: structured.stores }
+        : { url, status: 'pending', title: article.title, article, errors: structured.errors, warnings: structured.warnings });
+    } catch (error) {
+      results.push({ url, status: 'failed', error: String(error && error.message || error) });
+    }
+  }
+  return results;
 }
 
 async function handleRequest(request, response) {
@@ -211,6 +249,37 @@ async function handleRequest(request, response) {
           detail
         });
       }
+      return;
+    }
+    if (requestUrl.pathname === '/api/articles/import-batch') {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: 'Method Not Allowed，请使用 POST 批量导入文章' });
+        return;
+      }
+      if (!isSyncAuthorized(request)) {
+        sendJson(response, 401, { error: '无效的同步触发令牌' });
+        return;
+      }
+      const payload = await readRequestBody(request);
+      const results = await importArticleBatch(payload);
+      const queueRepository = createCloudbaseRepository({ bucket: process.env.CLOUDBASE_STORAGE_BUCKET || '', storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || '', documentId: 'article-review-queue', defaultValue: [] });
+      const contentRepository = createCloudbaseRepository({ bucket: process.env.CLOUDBASE_STORAGE_BUCKET || '', storagePrefix: process.env.CLOUDBASE_STORAGE_PREFIX || '', documentId: 'content', defaultValue: { articles: [], stores: [], goods: [], generatedAt: null, syncState: null } });
+      const queue = await queueRepository.read();
+      const content = await contentRepository.read();
+      const articles = [...(content.articles || [])];
+      const stores = [...(content.stores || [])];
+      const nextQueue = [...queue];
+      results.forEach(result => {
+        if (result.status === 'accepted') {
+          articles.push(result.article);
+          stores.push(...result.stores);
+        } else if (result.status === 'pending') {
+          nextQueue.push({ articleId: result.article.id, title: result.title, url: result.url, raw: result.article, errors: result.errors, warnings: result.warnings, status: '待补门店结构化信息' });
+        }
+      });
+      await contentRepository.write({ ...content, articles: [...new Map(articles.map(item => [item.id, item])).values()], stores: [...new Map(stores.map(item => [item.id, item])).values()], generatedAt: new Date().toISOString() });
+      await queueRepository.write([...new Map(nextQueue.map(item => [item.articleId, item])).values()]);
+      sendJson(response, 200, { imported: true, total: results.length, acceptedCount: results.filter(item => item.status === 'accepted').length, pendingCount: results.filter(item => item.status === 'pending').length, failedCount: results.filter(item => item.status === 'failed').length, results });
       return;
     }
     if (requestUrl.pathname === '/api/articles/import') {

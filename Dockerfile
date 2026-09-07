@@ -1,10 +1,10 @@
 # CloudBase 云托管 Dockerfile
-FROM node:18-alpine
+FROM mcr.microsoft.com/playwright:v1.61.1-jammy
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --production
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev
 
 COPY . .
 
