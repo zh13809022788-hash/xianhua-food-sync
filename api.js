@@ -278,7 +278,11 @@ async function handleRequest(request, response) {
           nextQueue.push({ articleId: result.article.id, title: result.title, url: result.url, raw: result.article, errors: result.errors, warnings: result.warnings, status: '待补门店结构化信息' });
         }
       });
-      await contentRepository.write({ ...content, articles: [...new Map(articles.map(item => [item.id, item])).values()], stores: [...new Map(stores.map(item => [item.id, item])).values()], generatedAt: new Date().toISOString() });
+      const uniqueArticles = [...new Map(articles.map(item => [item.url || item.id, item])).values()];
+      const validArticleIds = new Set(uniqueArticles.map(item => item.id));
+      const uniqueStores = [...new Map(stores.map(item => [item.id, item])).values()]
+        .filter(item => validArticleIds.has(item.articleId));
+      await contentRepository.write({ ...content, articles: uniqueArticles, stores: uniqueStores, generatedAt: new Date().toISOString() });
       await queueRepository.write([...new Map(nextQueue.map(item => [item.articleId, item])).values()]);
       sendJson(response, 200, { imported: true, total: results.length, acceptedCount: results.filter(item => item.status === 'accepted').length, pendingCount: results.filter(item => item.status === 'pending').length, failedCount: results.filter(item => item.status === 'failed').length, results });
       return;
