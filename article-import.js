@@ -22,6 +22,7 @@ function normalizeStoreProfile(profile, article, storeId) {
     recommendation: item.recommendation || article.summary || '',
     note: item.note || article.summary || '',
     businessHours: item.businessHours || '',
+    cover: item.cover || article.cover || '',
     latitude: Number(item.latitude) || 0,
     longitude: Number(item.longitude) || 0
   };

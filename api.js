@@ -9,7 +9,7 @@ const { createSyncService } = require('./sync-service');
 const { normalizeArticleInput, buildStoreRecords } = require('./article-import');
 const { renderOfficialArticle } = require('./wechat-renderer');
 const crypto = require('node:crypto');
-const BUILD_VERSION = 'batch-import-20260907-cleanup-1';
+const BUILD_VERSION = 'media-map-admin-20260908-1';
 
 const dataDir = process.env.WECHAT_SYNC_DATA_DIR
   ? path.resolve(process.env.WECHAT_SYNC_DATA_DIR)
@@ -98,6 +98,26 @@ function isSyncAuthorized(request) {
   return request.headers['x-sync-token'] === token;
 }
 
+function getAdminOpenIds() {
+  return String(process.env.SUPER_ADMIN_OPENIDS || process.env.ADMIN_OPENIDS || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function getRequestOpenId(request) {
+  return String(request.headers['x-wx-openid'] || request.headers['x-wx-open-id'] || '').trim();
+}
+
+function isAdminRequest(request) {
+  const openId = getRequestOpenId(request);
+  return Boolean(openId && getAdminOpenIds().includes(openId));
+}
+
+function canImportArticles(request) {
+  return isAdminRequest(request) || isSyncAuthorized(request);
+}
+
 function startBackgroundSync() {
   syncRunning = true;
   lastSyncError = null;
@@ -152,6 +172,52 @@ function isArticleUrl(url) {
   return /^https:\/\/mp\.weixin\.qq\.com\/s\/[A-Za-z0-9_-]+/.test(String(url || ''));
 }
 
+async function geocodeAddress(address, city) {
+  const key = String(process.env.TENCENT_MAP_KEY || 'GA2BZ-4XCEQ-SAU53-2O77L-3GCXH-XFBS4').trim();
+  const query = String(address || '').trim();
+  if (!key || !query) return null;
+  const url = new URL('https://apis.map.qq.com/ws/geocoder/v1/');
+  url.searchParams.set('address', query);
+  url.searchParams.set('key', key);
+  if (city) url.searchParams.set('region', String(city));
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`腾讯地图地址解析失败：HTTP ${response.status}`);
+  const data = await response.json();
+  if (data.status !== 0 || !data.result || !data.result.location) {
+    throw new Error(`腾讯地图地址解析失败：${data.message || data.status}`);
+  }
+  return {
+    latitude: Number(data.result.location.lat),
+    longitude: Number(data.result.location.lng),
+    title: data.result.title || '',
+    address: data.result.address || query
+  };
+}
+
+async function enrichStoreProfiles(article) {
+  if (!article || !Array.isArray(article.storeProfiles)) return article;
+  const profiles = [];
+  for (const profile of article.storeProfiles) {
+    const next = { ...profile };
+    if ((!next.latitude || !next.longitude) && next.address) {
+      try {
+        const point = await geocodeAddress(next.address, next.city || article.city);
+        if (point) {
+          next.latitude = point.latitude;
+          next.longitude = point.longitude;
+          next.mapTitle = point.title;
+          if (!next.address && point.address) next.address = point.address;
+        }
+      } catch (error) {
+        console.warn('geocode skipped:', error.message);
+      }
+    }
+    next.cover = next.cover || article.cover || '';
+    profiles.push(next);
+  }
+  return normalizeArticleInput({ ...article, storeProfiles: profiles });
+}
+
 async function importArticleFromUrl(payload) {
   const url = String(payload && payload.url || '').trim();
   if (!isArticleUrl(url)) throw new Error('只支持已发布的微信公众号文章链接：https://mp.weixin.qq.com/s/...');
@@ -202,7 +268,7 @@ async function importArticleBatch(payload) {
   const results = [];
   for (const url of [...new Set(urls.map(item => String(item || '').trim()).filter(Boolean))]) {
     try {
-      const article = await importArticleFromUrl({ ...payload, url });
+      const article = await enrichStoreProfiles(await importArticleFromUrl({ ...payload, url }));
       const structured = buildStoreRecords(article);
       results.push(structured.valid
         ? { url, status: 'accepted', title: article.title, article, stores: structured.stores }
@@ -257,8 +323,8 @@ async function handleRequest(request, response) {
         sendJson(response, 405, { error: 'Method Not Allowed，请使用 POST 批量导入文章' });
         return;
       }
-      if (!isSyncAuthorized(request)) {
-        sendJson(response, 401, { error: '无效的同步触发令牌' });
+      if (!canImportArticles(request)) {
+        sendJson(response, 403, { error: '仅超级管理员可以导入公众号文章' });
         return;
       }
       const payload = await readRequestBody(request);
@@ -292,12 +358,12 @@ async function handleRequest(request, response) {
         sendJson(response, 405, { error: 'Method Not Allowed，请使用 POST 导入文章' });
         return;
       }
-      if (!isSyncAuthorized(request)) {
-        sendJson(response, 401, { error: '无效的同步触发令牌' });
+      if (!canImportArticles(request)) {
+        sendJson(response, 403, { error: '仅超级管理员可以导入公众号文章' });
         return;
       }
       const payload = await readRequestBody(request);
-      const article = await importArticleFromUrl(payload);
+      const article = await enrichStoreProfiles(await importArticleFromUrl(payload));
       const structured = buildStoreRecords(article);
       const queueRepository = createCloudbaseRepository({
         bucket: process.env.CLOUDBASE_STORAGE_BUCKET || '',
@@ -373,6 +439,10 @@ async function handleRequest(request, response) {
       return;
     }
     const data = await readData();
+    if (requestUrl.pathname === '/api/admin/status') {
+      sendJson(response, 200, { isAdmin: isAdminRequest(request) });
+      return;
+    }
     if (requestUrl.pathname === '/api/content') {
       sendJson(response, 200, data);
       return;
